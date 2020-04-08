@@ -1,0 +1,329 @@
+ Создаем todo для команды на Laravel!
+ Всем привет! Сегодня, в столь удаленное для всех время работы, я бы хотел разобрать создание несложной панели, в которой можно создавать свои дела. Звучит как то, что написано в официальной документации Laravel, и так оно и есть  - я использую их todo в качестве базовой основы, немного его трансформирую, а основная часть моего рассказа будет про то, как создать роли пользователей, и <del>создать очередной нелепый клон Trello</del>.
+
+ <h3>  Делаем основанием </h3>
+ Как я уже сказал, за основу мы возьмем следующий  <a href="https://laravel.com/docs/5.1/quickstart"> гайд</a>. Он очень простой, и в основном концетрируется на работе с миграциях и работы с роутингом, чем на программировании контроллеров и моделей. К большому сожалению, его не обновляли с версии 5.1, и если вы только начинаете программировать в Laravel на последней 7 версии, роутинг вам придется писать не в app/Http/routes.php, в routes/web.php, и в общем на этом вся разница заканчивается. У вас должно получится что-то вроде такого:
+<img src="https://habrastorage.org/webt/vt/kw/at/vtkwatppc_py1c7l9jutt16qouq.png" />
+Так же я поменял фреймворк для верстки с bootstrap на bulma. Во-первых, мне он больше нравится, а вот вторых у меня уже была кодовая база blade шаблонов регистраций(хотя с другой нарастить страницы регистраций и авторизаций очень просто, я покажу дальше, как). 
+Эту версию проекта можно скачать здесь в ветке мастер. Активировать вы её сможете с помощью следующих команд, при условии что у вас уже установлен composer и laravel:
+<source>
+composer install
+// создаете файл .env, копируете в него .env example, настраиваетесь под вашу базу данных
+php artisan key:generate //устанвлваете ключ безопасности
+php artisan serve 
+</source>
+<h5> Установка авторизаций</h5>
+ Авторизации "из коробки" поменялись с 6 версии, смотрите на номер версии в документации. Теперь для быстрого создания нужно поставить пакет, который можно вам быстро сгенерировать контроллеры и blade - шаблоны:
+ <source>
+	composer install laravel/ui
+	php artisan ui vue --auth
+ </source>
+ У вас должно добавиться несколько вещей:
+ в папке resourses появится подпапка auth, в которой будут файлы blade шаблонов, посвященные авторизации, паролям. Изначально blade - шаблоны изначально сверстаны в Bulma, однако я их немного трансформировал в bulma, что бы соблюсти общность css-фрейворка. Однако, чтобы можно было пользоваться веб-сайтом, нам потребуется панель навигации. В resources я создал папку includes, в которой разместил вспомогательные файлы - header и nav. Чтобы не занимать много места, скажу, что в header у меня была только head с подлючением bulma, а в nav.blade.php было следующее:
+ <source>
+<nav class="navbar has-background-black-ter" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <a class="navbar-item has-text-white is-size-4" href="/">
+      TODO
+    </a>
+    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </a>
+  </div>
+  <div class="navbar-menu">
+    <div class="navbar-start">
+      @if (Auth::check())
+      <button type="button" class="button is-primary">
+        <!-- если пользователь зарегистрирован, тогда ->отобразить его имя -->
+        {{{ Auth::user()->name}}}
+      </button>
+      @else
+      <!-- в другом случае -->
+      <a class="navbar-item has-text-danger" href="{{route('register')}}">Регистрация</a>
+      <a class="navbar-item has-text-danger" href="{{route('login')}}">Войти</a>
+      @endif
+      @if (Auth::check())
+      <!-- если зарегистрирован, тогда нам нужно показать как выйти -->
+      <!-- это можно сделать через форму -->
+
+      <a class="navbar-item has-text-danger" href="{{url('/logout') }}" onclick="event.preventDefault();
+                  document.getElementById('logout-form').submit();">
+        Выйти </a>
+      <form id="logout-form" action="{{ url('/logout') }}" method="POST" style="display: none;">
+        {{ csrf_field() }}
+      </form>
+
+      @endif
+      </ul>
+    </div>
+
+    <div class="navbar-end">
+      <!-- navbar items -->
+    </div>
+  </div>
+</nav>
+
+ </source>
+
+ <h3> Начинаем делать нашу архитектуру </h3>
+ Пора уже и обсудить структуру нашего проекта. Потом читатель сможет трансформировать наше приложение под свои нужды, но сейчас, допустим, я хочу, чтобы вв приложении был один админстратор( допустим, проджект менеджер), который может ставить и удалять задачи, и какая-то кооманда, которая может эти команды видеть. Конечно, было бы уже совсем неплохо, если бы кто-то мог брать задачи и обозначать, что именно он их выполняет, но об этом как-нибудь потом.
+ Окей, значит у нас будет две групы юзеров, и условимся, что увидеть нашу доску задач смогут только авторизованные юзеры, которым дали доступ, а добавлять задачи - некоторые суперадмины. Давайте преступим.
+ Для небольшого упрощения я решил разбить наше приложение на две страницы: одну, на которой у нас будет только задачи без возможности редактирования, и вторую, которая будет доступна только суперадмину. Доступную команде страницу я решил назвать welcome.blade.php:
+ <source lang="php">
+@include('includes.header')
+
+<body>
+    @include('includes.nav')
+    <div class="columns is-centered">
+        <div class="column is-half">
+            <div class="panel">
+                <div class="panel-heading">
+                    Текущие задачи
+                </div>
+
+                <div class="panel-body">
+                    @foreach ($tasks as $task)
+                    <a class="panel-block">
+                        <button class="button is-rounded">
+                            <span>{{ $task->name }}</span>
+                        </button>
+                        @endforeach
+                </div>
+            </div>
+        </div>
+    </div>
+<body>
+</html>
+ </source>
+ Эта страница выводит только список задач.  Шаблон, в котором у нас тот же список, но с возможностью редактирования и добавления, называется task.blade.php. Он слишком ввелик, поэтому я размещу его под спойлером:
+ <spoiler>
+<source>
+@extends('layouts.app')
+
+@section('content')
+<div class="columns is-centered">
+    <div class="column is-half">
+        <div class="panel">
+            <div class="panel-heading">
+                Новое дело
+            </div>
+            <div class="panel-block">
+                @include('common.errors')
+                <!-- Форма для создания тасков -->
+                <form action="{{ url('task')}}" method="POST">
+                    {{ csrf_field() }}
+
+                    <div class="field">
+                        <label for="task-name" class="label is-medium">Дело</label>
+                        <input type=" text" name="name" id="task-name" class="input is-medium"
+                            value="{{ old('task') }}">
+                    </div>
+
+                    <div class="field">
+                        <button type="submit" class="button is-success">
+                            <span class="icon">
+                                <i class="fa fa-btn fa-plus">
+                            </span></i>
+                            <span>Добавить дело</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Current Tasks -->
+        @if (count($tasks) > 0)
+        <div class="panel">
+            <div class="panel-heading">
+                Текущие задачи
+            </div>
+
+            <div class="panel-body">
+                {{-- <table class="table table-striped task-table">
+                    <thead>
+                        <th>Дело</th>
+                        <th>&nbsp;</th>
+                    </thead>
+                    <tbody> --}}
+                @foreach ($tasks as $task)
+                <a class="panel-block">
+                    <button class="button is-rounded">
+                    <span>{{ $task->name }}</span>
+                </button>
+                    <form action="{{ url('task/'.$task->id) }}" method="POST">
+                        {{ csrf_field() }}
+                        {{ method_field('DELETE') }}
+                        <button type="submit" class="button is-danger">
+                            <span class="icon is-small"> <i class="fa fa-btn fa-trash"></i></span>
+                            <span> Удалить </span>
+                        </button>
+                    </form>
+                </a>
+                @endforeach
+            </div>
+        </div>
+        @endif
+    </div>
+</div>
+@endsection
+
+</source>
+ </spoiler>
+
+И этот шаблон, как и оригинале, расширяется в app/layouts.blade.php:
+
+<source lang="php">
+@include('includes.header')
+
+<body>
+    @include('includes.nav')
+
+    @yield('content')
+
+</body>
+
+</html>
+</source>
+
+Отлично! С внешним видом мы определились, теперь можешь переходить к роутингу и к созданию наших middlewairs.
+Для начала мы зайдем в модель Users и добавим новые типы пользователей:
+<source lang="php">
+
+	const ADMIN_TYPE = 'admin';
+    const TEAM_TYPE = 'team';
+    #и добавляем в самый конец класса двве функции проверки:
+
+    public function isAdmin()    {        
+        return $this->type === self::ADMIN_TYPE;    
+    }
+
+</source> 
+Далее заходим в последнюю миграцию таблицы users (папка database/migrations) и добавляем колонку с нашим новым типом данных:
+<source>
+$table->string('type')->default('team');
+
+</source>
+ 
+Дальше проходим в app/Http/Controllers/Auth/RegisterController.php и немного редактируем :
+
+<source lang="php">
+ protected function create(array $data)
+    {
+        return User::create([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => Hash::make($data['password']),
+            'type' => User::TEAM_TYPE,  
+        ]);
+    }
+
+</source>
+Окей, дальше нам нужно создать нашу middleware для нашего админа. Проще всего это осуществить с помощью следующей команды:
+<source>
+php artisan make:middleware IsAdmin
+</source>
+Надеюсь, у вас все получилось. В папке HTTP/middleware у вас должен был появится isAdmin.php, в которой функцию handle нужно отредактировать следующим образом:
+<source>
+    public function handle($request, Closure $next)
+    {
+        if(auth()->user()->isAdmin()) {
+            return $next($request);
+        }
+        return redirect('home');
+    }
+</source>
+Дальше нам нужно зарегистрировать наш middlewire в app/HTTP/Kernel:
+<source>
+    protected $routeMiddleware = [
+    		#множество других мидлевеиров, не так важных для этой истории
+        'is_admin' => \App\Http\Middleware\IsAdmin::class,
+    ];
+</source>
+Трансформируем наш  путь dash, который должен иметь возможность видеть только суперадмин.
+<source>
+    Route::get('/dash', function () {
+        return view('tasks', [
+            'tasks' => Task::orderBy('created_at', 'asc')->get(),
+        ]); 
+    })
+    ->middleware('is_admin')    
+    ->name('admin');
+</source>
+ Осталось создать кастомный контролер для нашего администратора:
+ <source>
+	php artisan make:controller AdminController
+ </source>
+ Дальше нам нужно только отредактировать наш контроллер AdminController:
+ <source>
+    public function __construct()
+    {
+        $this->middleware('auth');
+    }
+    public function admin()
+    {
+        return view('admin');
+    }
+
+ </source>
+
+ Чтобы у вас все с регистрацией заработало конкретно, нужно не забыть поправить редирект в  RouteServiceProvider.php в app/HTTP/Providers:
+ <source lang="php">
+ 	public const HOME = '/';
+ </source>
+
+ Теперь админстратор у нас может появится только с помощью нашего доброго помошника tinker: 
+ <source>
+	php artisan tinker
+	use App\User;
+	User::where('email', 'admin@mail.com')->update(['type' => 'admin']);
+ </source>
+
+На этом все. Конечно, наше приложение прямо сейчас нельзя использовать в продакшене, потому что ваши задачи сейчас сможет увидеть каждый, кто зарегестрировался на ресурсе. Но как вы будете ограничивать доступ? Возможно, у вас есть корпоративная почта, и тогда вы сможете ограничивать доступ в команду с помощью регулярок в валидизации почты. Или вы сможете добавить проверку на членство в команде точно также, как админа, проделав похожие манипуляции.  По традиции, приведу несколько полезный ссылок, для тех, кто только собирается начать осваивать Laravel:
+<a href="https://www.sitepoint.com/laravel-migrations/">Чуть более подробная статья, чем в жокументации, о миграциях в Laravel</a>
+<a href="https://medium.com/@tomgrohl/implementing-user-roles-into-a-laravel-application-f8b9b5c266a7"> Неплохая статья на Medium про роли в Laravel</a>
+<a href="https://laravel.demiart.ru/laravel-7-whats-new/"> Что у нас свеженького в Laravel 7</a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
